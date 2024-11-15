@@ -25,7 +25,7 @@ from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
 FRANKA_PANDA_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
         usd_path=f"{ISAACLAB_NUCLEUS_DIR}/Robots/FrankaEmika/panda_instanceable.usd",
-        activate_contact_sensors=False,
+        activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
             max_depenetration_velocity=5.0,
@@ -44,7 +44,7 @@ FRANKA_PANDA_CFG = ArticulationCfg(
             "panda_joint5": 0.0,
             "panda_joint6": 3.037,
             "panda_joint7": 0.741,
-            "panda_finger_joint.*": 0.04,
+            "panda_finger_joint.*": 0.00,
         },
     ),
     actuators={
