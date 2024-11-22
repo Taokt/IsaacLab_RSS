@@ -12,7 +12,7 @@ PhysX. This helps perform parallelized computation of the inverse kinematics.
 .. code-block:: bash
 
     # Usage
-    ./isaaclab.sh -p source/standalone/tutorials/05_controllers/ik_control.py
+    ./isaaclab.sh -p my_tasks/controller_test.py --robot kuka
 
 """
 
