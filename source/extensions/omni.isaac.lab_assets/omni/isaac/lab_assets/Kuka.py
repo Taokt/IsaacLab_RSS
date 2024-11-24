@@ -24,7 +24,7 @@ from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
 
 KUKA_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path = "/home/ji0341li/CS_Project/IsaacLab_RSS/my_tasks/iiwa7.usd",
+        usd_path = "/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/iiwa7.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,

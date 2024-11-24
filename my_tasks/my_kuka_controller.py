@@ -13,6 +13,7 @@ PhysX. This helps perform parallelized computation of the inverse kinematics.
 
     # Usage
     ./isaaclab.sh -p source/standalone/tutorials/05_controllers/ik_control.py
+    ./isaaclab.sh -p my_tasks/my_kuka_controller.py
 
 """
 
@@ -72,7 +73,7 @@ from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
 
 KUKA_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path = "/home/ji0341li/CS_Project/IsaacLab_RSS/my_tasks/iiwa7.usd",
+        usd_path = "./my_tasks/iiwa7.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
