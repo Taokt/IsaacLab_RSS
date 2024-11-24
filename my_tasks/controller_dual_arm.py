@@ -19,6 +19,8 @@ PhysX. This helps perform parallelized computation of the inverse kinematics.
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import torch
+import numpy as np
 
 from omni.isaac.lab.app import AppLauncher
 
@@ -259,6 +261,7 @@ def reset_simulation(
     robot.reset()
 
     ik_commands[:] = ee_goals[current_goal_idx]
+    print(ee_goals[current_goal_idx])
     diff_ik_controller.reset()
     diff_ik_controller.set_command(ik_commands)
 
@@ -283,6 +286,99 @@ def compute_joint_commands(robot, robot_entity_cfg, diff_ik_controller, ee_jacob
     # Compute joint commands
     joint_pos_des = diff_ik_controller.compute(ee_pos_b, ee_quat_b, jacobian, joint_pos)
     return joint_pos_des
+
+
+def transform_pose(robot, ee_goals):
+    """
+    Convert local end-effector goals to world coordinates based on the robot's base pose.
+
+    Args:
+        robot: The robot object containing the root state and other configurations.
+        ee_goals (torch.Tensor): Local end-effector goals in the format [x, y, z, qx, qy, qz, qw].
+
+    Returns:
+        ee_goals_world (torch.Tensor): Transformed goals in the world frame.
+    """
+    # Extract the robot's base pose in the world frame
+    robot_base_pose = robot.data.root_state_w[:, 0:7]  # [x, y, z, qw, qx, qy, qz]
+    base_pos = robot_base_pose[:, 0:3]  # Base position [x, y, z]
+    base_quat = robot_base_pose[:, 3:7]  # Base quaternion [qw, qx, qy, qz]
+
+    # Prepare tensor for world goals
+    ee_goals_world = torch.zeros_like(ee_goals, device=ee_goals.device)
+
+    for i in range(ee_goals.shape[0]):
+        # Extract local position and orientation of the goal
+        local_pos = ee_goals[i, 0:3]
+        local_quat = ee_goals[i, 3:7]
+
+        # Compute world position
+        world_pos = base_pos[0] + rotate_vector_by_quaternion(local_pos, base_quat[0])
+
+        # Compute world quaternion: q_world = q_base * q_local
+        base_quat_np = (
+            base_quat[0].cpu().numpy()
+        )  # Convert to NumPy for quaternion multiplication
+        local_quat_np = local_quat.cpu().numpy()
+        world_quat_np = quaternion_multiply(base_quat_np, local_quat_np)
+
+        # Store transformed pose
+        ee_goals_world[i, 0:3] = torch.tensor(world_pos, device=ee_goals.device)
+        ee_goals_world[i, 3:7] = torch.tensor(world_quat_np, device=ee_goals.device)
+
+    return ee_goals_world
+
+
+def rotate_vector_by_quaternion(vector, quaternion):
+    """
+    Rotate a 3D vector by a quaternion.
+
+    Args:
+        vector (torch.Tensor): A 3D vector [x, y, z].
+        quaternion (torch.Tensor): A quaternion [qw, qx, qy, qz].
+
+    Returns:
+        rotated_vector (torch.Tensor): Rotated vector in the world frame.
+    """
+    qw, qx, qy, qz = quaternion
+    x, y, z = vector
+
+    # Quaternion rotation formula
+    t2 = qw * qx
+    t3 = qw * qy
+    t4 = qw * qz
+    t5 = -qx * qx
+    t6 = qx * qy
+    t7 = qx * qz
+    t8 = -qy * qy
+    t9 = qy * qz
+    t10 = -qz * qz
+
+    rx = 2.0 * ((t8 + t10) * x + (t6 - t4) * y + (t3 + t7) * z) + x
+    ry = 2.0 * ((t4 + t6) * x + (t5 + t10) * y + (t9 - t2) * z) + y
+    rz = 2.0 * ((t7 - t3) * x + (t2 + t9) * y + (t5 + t8) * z) + z
+
+    return torch.tensor([rx, ry, rz], device=vector.device)
+
+
+def quaternion_multiply(q1, q2):
+    """
+    Perform quaternion multiplication q1 * q2.
+
+    Args:
+        q1 (numpy.ndarray): Quaternion [qw, qx, qy, qz].
+        q2 (numpy.ndarray): Quaternion [qw, qx, qy, qz].
+
+    Returns:
+        numpy.ndarray: Result of quaternion multiplication.
+    """
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+    return np.array([w, x, y, z])
 
 
 def run_simulator(sim, scene):
@@ -315,6 +411,8 @@ def run_simulator(sim, scene):
         device=sim.device,
     )
 
+    ee_globel_goals = transform_pose(robot, ee_goals)
+
     current_goal_idx = 0
     ik_commands = torch.zeros(
         scene.num_envs, diff_ik_controller.action_dim, device=robot.device
@@ -325,26 +423,70 @@ def run_simulator(sim, scene):
     count = 0
 
     while simulation_app.is_running():
-        if count % 300 == 0:
-            current_goal_idx = reset_simulation(
-                robot,
-                robot_entity_cfg,
-                diff_ik_controller,
-                ik_commands,
-                ee_goals,
-                current_goal_idx,
-            )
+        # reset
+        if count % 150 == 0:
+            # reset time
+            count = 0
+            # reset joint state
+            joint_pos = robot.data.default_joint_pos.clone()
+            joint_vel = robot.data.default_joint_vel.clone()
+            robot.write_joint_state_to_sim(joint_pos, joint_vel)
+            robot.reset()
+            # reset actions
+            ik_commands[:] = ee_goals[current_goal_idx]
+            joint_pos_des = joint_pos[:, robot_entity_cfg.joint_ids].clone()
+            # reset controller
+            diff_ik_controller.reset()
+            diff_ik_controller.set_command(ik_commands)
+            # change goal
+            current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
         else:
-            joint_pos_des = compute_joint_commands(
-                robot, robot_entity_cfg, diff_ik_controller, ee_jacobi_idx
+            # obtain quantities from simulation
+            jacobian = robot.root_physx_view.get_jacobians()[
+                :, ee_jacobi_idx, :, robot_entity_cfg.joint_ids
+            ]
+            ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
+            root_pose_w = robot.data.root_state_w[:, 0:7]
+            joint_pos = robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
+            # print("obtain quantities from simulation", root_pose_w, joint_pos)
+            # compute frame in root frame
+            ee_pos_b, ee_quat_b = subtract_frame_transforms(
+                root_pose_w[:, 0:3],
+                root_pose_w[:, 3:7],
+                ee_pose_w[:, 0:3],
+                ee_pose_w[:, 3:7],
             )
-            robot.set_joint_position_target(
-                joint_pos_des, joint_ids=robot_entity_cfg.joint_ids
+            print("compute frame in root frame", ee_pos_b, ee_quat_b)
+            # compute the joint commands
+            joint_pos_des = diff_ik_controller.compute(
+                ee_pos_b, ee_quat_b, jacobian, joint_pos
             )
+        # if count % 300 == 0:
+        #     current_goal_idx = reset_simulation(
+        #         robot,
+        #         robot_entity_cfg,
+        #         diff_ik_controller,
+        #         ik_commands,
+        #         ee_globel_goals,
+        #         current_goal_idx,
+        #     )
+        # else:
+        #     joint_pos_des = compute_joint_commands(
+        #         robot, robot_entity_cfg, diff_ik_controller, ee_jacobi_idx
+        #     )
+        #     robot.set_joint_position_target(
+        #         joint_pos_des, joint_ids=robot_entity_cfg.joint_ids
+        #     )
+
+        # apply actions
+        robot.set_joint_position_target(
+            joint_pos_des, joint_ids=robot_entity_cfg.joint_ids
+        )
 
         # Perform simulation step
         scene.write_data_to_sim()
         sim.step()
+        count += 1
         scene.update(sim_dt)
 
         # Visualization
@@ -353,8 +495,6 @@ def run_simulator(sim, scene):
         goal_marker.visualize(
             ik_commands[:, 0:3] + scene.env_origins, ik_commands[:, 3:7]
         )
-
-        count += 1
 
 
 def main():
