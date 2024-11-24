@@ -210,13 +210,9 @@ class TableTopSceneCfg(InteractiveSceneCfg):
         )
 
 
-def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
-    """Runs the simulation loop."""
-    # Extract scene entities
-    # note: we only do this here for readability.
-    robot = scene["robot"]
-
-    # Create controller
+def initialize_controller(sim, scene, robot_type):
+    """Initialize the controller and configuration for the robot."""
+    # Initialize the controller
     diff_ik_cfg = DifferentialIKControllerCfg(
         command_type="pose", use_relative_mode=False, ik_method="dls"
     )
@@ -224,7 +220,82 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         diff_ik_cfg, num_envs=scene.num_envs, device=sim.device
     )
 
-    # Markers
+    # Define robot-specific parameters
+    if robot_type == "franka_panda":
+        robot_entity_cfg = SceneEntityCfg(
+            "robot", joint_names=["panda_joint.*"], body_names=["panda_hand"]
+        )
+    elif robot_type == "ur10":
+        robot_entity_cfg = SceneEntityCfg(
+            "robot", joint_names=[".*"], body_names=["ee_link"]
+        )
+    elif robot_type == "kuka":
+        robot_entity_cfg = SceneEntityCfg(
+            "robot", joint_names=[".*"], body_names=["hande_robotiq_hande_base_link"]
+        )
+    else:
+        raise ValueError(
+            f"Robot {robot_type} is not supported. Valid: franka_panda, ur10, kuka"
+        )
+
+    robot_entity_cfg.resolve(scene)
+
+    # Determine the frame index for the end-effector
+    if scene["robot"].is_fixed_base:
+        ee_jacobi_idx = robot_entity_cfg.body_ids[0] - 1
+    else:
+        ee_jacobi_idx = robot_entity_cfg.body_ids[0]
+
+    return diff_ik_controller, robot_entity_cfg, ee_jacobi_idx
+
+
+def reset_simulation(
+    robot, robot_entity_cfg, diff_ik_controller, ik_commands, ee_goals, current_goal_idx
+):
+    """Reset the simulation, including robot joint states and IK commands."""
+    joint_pos = robot.data.default_joint_pos.clone()
+    joint_vel = robot.data.default_joint_vel.clone()
+    robot.write_joint_state_to_sim(joint_pos, joint_vel)
+    robot.reset()
+
+    ik_commands[:] = ee_goals[current_goal_idx]
+    diff_ik_controller.reset()
+    diff_ik_controller.set_command(ik_commands)
+
+    # Update the goal index
+    current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
+    return current_goal_idx
+
+
+def compute_joint_commands(robot, robot_entity_cfg, diff_ik_controller, ee_jacobi_idx):
+    """Compute joint commands using the differential IK controller."""
+    jacobian = robot.root_physx_view.get_jacobians()[
+        :, ee_jacobi_idx, :, robot_entity_cfg.joint_ids
+    ]
+    ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
+    root_pose_w = robot.data.root_state_w[:, 0:7]
+    joint_pos = robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
+
+    # Compute the end-effector pose in the base frame
+    ee_pos_b, ee_quat_b = subtract_frame_transforms(
+        root_pose_w[:, 0:3], root_pose_w[:, 3:7], ee_pose_w[:, 0:3], ee_pose_w[:, 3:7]
+    )
+    # Compute joint commands
+    joint_pos_des = diff_ik_controller.compute(ee_pos_b, ee_quat_b, jacobian, joint_pos)
+    return joint_pos_des
+
+
+def run_simulator(sim, scene):
+    """Runs the simulation loop."""
+    # Extract scene entities
+    robot = scene["robot"]
+
+    # Initialize the controller
+    diff_ik_controller, robot_entity_cfg, ee_jacobi_idx = initialize_controller(
+        sim, scene, args_cli.robot
+    )
+
+    # Markers for visualization
     frame_marker_cfg = FRAME_MARKER_CFG.copy()
     frame_marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
     ee_marker = VisualizationMarkers(
@@ -235,117 +306,55 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     )
 
     # Define goals for the arm
-    ee_goals = [
-        [0.5, 0.5, 0.7, 0.707, 0, 0.707, 0],
-        [0.5, -0.4, 0.6, 0.707, 0.707, 0.0, 0.0],
-        [0.5, 0, 0.5, 0.0, 1.0, 0.0, 0.0],
-    ]
-    ee_goals = torch.tensor(ee_goals, device=sim.device)
-    # Track the given command
+    ee_goals = torch.tensor(
+        [
+            [0.5, 0.5, 0.7, 0.707, 0, 0.707, 0],
+            [0.5, -0.4, 0.6, 0.707, 0.707, 0.0, 0.0],
+            [0.5, 0, 0.5, 0.0, 1.0, 0.0, 0.0],
+        ],
+        device=sim.device,
+    )
+
     current_goal_idx = 0
-    # Create buffers to store actions
     ik_commands = torch.zeros(
         scene.num_envs, diff_ik_controller.action_dim, device=robot.device
     )
-    ik_commands[:] = ee_goals[current_goal_idx]
 
-    # Specify robot-specific parameters
-    if args_cli.robot == "franka_panda":
-        robot_entity_cfg = SceneEntityCfg(
-            "robot", joint_names=["panda_joint.*"], body_names=["panda_hand"]
-        )
-    elif args_cli.robot == "ur10":
-        robot_entity_cfg = SceneEntityCfg(
-            "robot", joint_names=[".*"], body_names=["ee_link"]
-        )
-    elif args_cli.robot == "kuka":
-        # robot_entity_cfg = SceneEntityCfg("robot", joint_names=["A1", "A2", "A3", "A4", "A5", "A6", "A7"], body_names=["hande_robotiq_hande_base_link"])
-        robot_entity_cfg = SceneEntityCfg(
-            "robot", joint_names=[".*"], body_names=["hande_robotiq_hande_base_link"]
-        )
-    else:
-        raise ValueError(
-            f"Robot {args_cli.robot} is not supported. Valid: franka_panda, ur10"
-        )
-    # Resolving the scene entities
-    robot_entity_cfg.resolve(scene)
-    # Obtain the frame index of the end-effector
-    # For a fixed base robot, the frame index is one less than the body index. This is because
-    # the root body is not included in the returned Jacobians.
-    if robot.is_fixed_base:
-        ee_jacobi_idx = robot_entity_cfg.body_ids[0] - 1
-    else:
-        ee_jacobi_idx = robot_entity_cfg.body_ids[0]
-
-    for idx, joint_name in enumerate(robot_entity_cfg.joint_names):
-        print(f"Joint ID: {idx}, Joint Name: {joint_name}")
-
-    # Define simulation stepping
+    # Simulation parameters
     sim_dt = sim.get_physics_dt()
     count = 0
-    # Simulation loop
+
     while simulation_app.is_running():
-        # reset
         if count % 300 == 0:
-            # reset time
-            count = 0
-            # reset joint state
-            joint_pos = robot.data.default_joint_pos.clone()
-            print(joint_pos)
-            joint_vel = robot.data.default_joint_vel.clone()
-            robot.write_joint_state_to_sim(joint_pos, joint_vel)
-            robot.reset()
-            # reset actions
-            ik_commands[:] = ee_goals[current_goal_idx]
-            joint_pos_des = joint_pos[:, robot_entity_cfg.joint_ids].clone()
-            # reset controller
-            diff_ik_controller.reset()
-            diff_ik_controller.set_command(ik_commands)
-            # change goal
-            current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
-        else:
-            # obtain quantities from simulation
-            jacobian = robot.root_physx_view.get_jacobians()[
-                :, ee_jacobi_idx, :, robot_entity_cfg.joint_ids
-            ]
-            ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
-            root_pose_w = robot.data.root_state_w[:, 0:7]
-            joint_pos = robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
-            # compute frame in root frame
-            ee_pos_b, ee_quat_b = subtract_frame_transforms(
-                root_pose_w[:, 0:3],
-                root_pose_w[:, 3:7],
-                ee_pose_w[:, 0:3],
-                ee_pose_w[:, 3:7],
+            current_goal_idx = reset_simulation(
+                robot,
+                robot_entity_cfg,
+                diff_ik_controller,
+                ik_commands,
+                ee_goals,
+                current_goal_idx,
             )
-            # compute the joint commands
-            joint_pos_des = diff_ik_controller.compute(
-                ee_pos_b, ee_quat_b, jacobian, joint_pos
+        else:
+            joint_pos_des = compute_joint_commands(
+                robot, robot_entity_cfg, diff_ik_controller, ee_jacobi_idx
+            )
+            robot.set_joint_position_target(
+                joint_pos_des, joint_ids=robot_entity_cfg.joint_ids
             )
 
-        # apply actions
-        # joint_pos_des[:, 0:9] = torch.tensor([[0,0,0,0,0,0,0,1.0, 0.025]], device='cuda:0')
-        # joint_pos_des[:, 0:7] = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 3.14, 0.78]], device='cuda:0')
-        # print('current position: ',joint_pos)
-        # print('angle output: ',joint_pos_des)
-        robot.set_joint_position_target(
-            joint_pos_des, joint_ids=robot_entity_cfg.joint_ids
-        )
+        # Perform simulation step
         scene.write_data_to_sim()
-        # perform step
         sim.step()
-        # update sim-time
-        count += 1
-        # update buffers
         scene.update(sim_dt)
 
-        # obtain quantities from simulation
+        # Visualization
         ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
-        # update marker positions
         ee_marker.visualize(ee_pose_w[:, 0:3], ee_pose_w[:, 3:7])
         goal_marker.visualize(
             ik_commands[:, 0:3] + scene.env_origins, ik_commands[:, 3:7]
         )
+
+        count += 1
 
 
 def main():
