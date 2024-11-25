@@ -140,7 +140,7 @@ class TableTopSceneCfg(InteractiveSceneCfg):
 
     camera = CameraCfg(
         # prim_path="{ENV_REGEX_NS}/Robot/panda_hand/front_cam",
-        prim_path="{ENV_REGEX_NS}/Robot/hande_robotiq_hande_base_link/front_cam",
+        prim_path="{ENV_REGEX_NS}/Robot/hande_link/front_cam",
         update_period=0.1,
         height=480,
         width=640,

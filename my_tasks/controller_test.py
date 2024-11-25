@@ -24,7 +24,7 @@ from omni.isaac.lab.app import AppLauncher
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Tutorial on using the differential IK controller.")
-parser.add_argument("--robot", type=str, default="franka_panda", help="Name of the robot.")
+parser.add_argument("--robot", type=str, default="kuka", help="Name of the robot.")
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -66,8 +66,7 @@ from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
 
 KUKA_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path = "/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/iiwa7.usd",
-        # usd_path = "/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/kuka_with_can.usd",
+        usd_path = "./my_tasks/iiwa7.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -101,6 +100,7 @@ KUKA_CFG = ArticulationCfg(
         ),
     },
 )
+
 
 
 @configclass
@@ -173,7 +173,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     elif args_cli.robot == "ur10":
         robot_entity_cfg = SceneEntityCfg("robot", joint_names=[".*"], body_names=["ee_link"])
     elif args_cli.robot == "kuka":
-        robot_entity_cfg = SceneEntityCfg("robot", joint_names=[".*"], body_names=["hande_robotiq_hande_base_link"])
+        robot_entity_cfg = SceneEntityCfg("robot", joint_names=[".*"], body_names=["hande_link"])
     else:
         raise ValueError(f"Robot {args_cli.robot} is not supported. Valid: franka_panda, ur10")
     # Resolving the scene entities

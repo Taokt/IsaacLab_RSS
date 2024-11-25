@@ -23,6 +23,10 @@ import torch
 import numpy as np
 
 from omni.isaac.lab.app import AppLauncher
+import omni.isaac.core
+# from omni.isaac.core import SimulationApp
+from omni.isaac.sensor import Camera
+from pxr import UsdGeom, Gf
 
 # add argparse arguments
 parser = argparse.ArgumentParser(
@@ -380,6 +384,42 @@ def quaternion_multiply(q1, q2):
     z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
     return np.array([w, x, y, z])
 
+def create_and_configure_camera(stage):
+    """Creates and configures a camera in the simulation stage."""
+    camera_path = "/World/RGBDCamera"
+    camera_prim = stage.DefinePrim(camera_path, "Camera")
+    
+    # Configure the camera properties
+    camera_prim.GetAttribute("xformOp:translate").Set(Gf.Vec3d(1, 1, 1))  # Set position
+    UsdGeom.Camera(camera_prim).GetHorizontalApertureAttr().Set(20)        # Set the horizontal aperture
+    UsdGeom.Camera(camera_prim).GetFocalLengthAttr().Set(24)               # Set the focal length
+    
+    return camera_path
+
+def attach_rgbd_sensor(camera_path):
+    """Attaches an RGBD sensor to the camera."""
+    rgbd_sensor = Camera(prim_path=camera_path, frequency=30, resolution=(640, 480), enable_depth=True)
+    rgbd_sensor.initialize()  # Initialize sensor to access data streams
+    return rgbd_sensor
+
+def get_rgbd_point_cloud(rgbd_sensor):
+    """Gets the RGBD point cloud from the sensor."""
+    rgb, depth = rgbd_sensor.get_rgb_depth()  # Get RGB and depth data
+    
+    # Convert depth map to point cloud
+    intrinsics = rgbd_sensor.get_intrinsics()
+    height, width = depth.shape
+    cx, cy = intrinsics[0, 2], intrinsics[1, 2]
+    fx, fy = intrinsics[0, 0], intrinsics[1, 1]
+
+    # Generate point cloud in camera frame
+    x, y = np.meshgrid(np.arange(width), np.arange(height))
+    z = depth
+    x = (x - cx) * z / fx
+    y = (y - cy) * z / fy
+    points_camera_frame = np.stack((x, y, z), axis=-1)
+    
+    return points_camera_frame
 
 def run_simulator(sim, scene):
     """Runs the simulation loop."""
@@ -488,6 +528,19 @@ def run_simulator(sim, scene):
         sim.step()
         count += 1
         scene.update(sim_dt)
+
+        stage = omni.usd.get_context().get_stage()
+        camera_path = create_and_configure_camera(stage)
+            
+        # Step 3: Attach an RGBD sensor
+        rgbd_sensor = attach_rgbd_sensor(camera_path)
+        
+        # Step 4: Start simulation and get RGBD point cloud
+        simulation_app.update()  # Advance one frame to update camera setup
+        points_camera_frame = get_rgbd_point_cloud(rgbd_sensor)
+        
+        # Output point cloud data
+        print("Point Cloud:", points_camera_frame)
 
         # Visualization
         ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
