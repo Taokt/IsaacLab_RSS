@@ -57,3 +57,4 @@ _build
 **/runs/*
 **/logs/*
 **/recordings/*
+my_tasks/distance_to_image_plane_59_0.npy
