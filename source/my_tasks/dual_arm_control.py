@@ -12,7 +12,9 @@ PhysX. This helps perform parallelized computation of the inverse kinematics.
 .. code-block:: bash
 
     # Usage
-    ./isaaclab.sh -p source/standalone/tutorials/05_controllers/ik_control.py
+    ./isaaclab.sh -p my_tasks/dual_arm_kuka.py --robot kuka
+    # in docker
+    ./isaaclab.sh -p ./source/my_tasks/dual_arm_kuka.py --robot kuka
 
 """
 
@@ -64,12 +66,11 @@ from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
 # Configuration
 ##
 
-TRASH_CAN_USD_PATH = "/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/my_can.usd"  
+TRASH_CAN_USD_PATH = "/workspace/isaaclab/source/my_tasks/can.usd"
 
 KUKA_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path = "/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/iiwa7.usd",
-        # usd_path = "/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/dual_arm.usd",
+        usd_path = "/workspace/isaaclab/source/my_tasks/dual_arm.usd"
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -84,55 +85,21 @@ KUKA_CFG = ArticulationCfg(
         pos=(-1.0, 0.0, 0.0),  # 左侧机械臂基座位置 (x, y, z)
         rot=(0.0, 0.0, 0.0, 1.0),  # 左侧机械臂基座方向 (四元数: w, x, y, z)
         joint_pos={
-            "A1": 0.0,
-            "A2": -0.569,
-            "A3": 0.0,
-            "A4": -2.810,
-            "A5": 0.0,
-            "A6": 3.037,
-            "A7": 0.741,
-            "hande_joint_finger": 0.0,
-            "robotiq_hande_base_to_hande_right_finger": 0.0,
-        },
-    ),
-    actuators={
-        "arm": ImplicitActuatorCfg(
-            joint_names_expr=[".*"],
-            velocity_limit=100.0,
-            effort_limit=100.0,
-            stiffness=1000000.0,
-            damping=40.0,
-        ),
-    },
-)
+            "left_iiwa_joint_1": 0.0,
+            "left_iiwa_joint_2": -0.569,
+            "left_iiwa_joint_3": 0.0,
+            "left_iiwa_joint_4": -2.810,
+            "left_iiwa_joint_5": 0.0,
+            "left_iiwa_joint_6": 3.037,
+            "left_iiwa_joint_7": 0.741,
+            "right_iiwa_joint_1": 0.0,
+            "right_iiwa_joint_2": -0.569,
+            "right_iiwa_joint_3": 0.0,
+            "right_iiwa_joint_4": -2.810,
+            "right_iiwa_joint_5": 0.0,
+            "right_iiwa_joint_6": 3.037,
+            "right_iiwa_joint_7": 0.741,
 
-KUKA_CFG_2 = ArticulationCfg(
-    spawn=sim_utils.UsdFileCfg(
-        usd_path = "/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/iiwa7.usd",
-        # usd_path = "/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/kuka_with_can.usd",
-        activate_contact_sensors=True,
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            disable_gravity=False,
-            max_depenetration_velocity=5.0,
-        ),
-        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            enabled_self_collisions=True, solver_position_iteration_count=8, solver_velocity_iteration_count=0
-        ),
-        # collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
-    ),
-    init_state=ArticulationCfg.InitialStateCfg(
-        pos=(1.0, 0.0, 0.0),  # 左侧机械臂基座位置 (x, y, z)
-        rot=(0.0, 0.0, 0.0, 1.0),  # 左侧机械臂基座方向 (四元数: w, x, y, z)
-        joint_pos={
-            "A1": 0.0,
-            "A2": -0.569,
-            "A3": 0.0,
-            "A4": -2.810,
-            "A5": 0.0,
-            "A6": 3.037,
-            "A7": 0.741,
-            "hande_joint_finger": 0.0,
-            "robotiq_hande_base_to_hande_right_finger": 0.0,
         },
     ),
     actuators={
@@ -229,7 +196,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     elif args_cli.robot == "ur10":
         robot_entity_cfg = SceneEntityCfg("robot", joint_names=[".*"], body_names=["ee_link"])
     elif args_cli.robot == "kuka":
-        robot_entity_cfg = SceneEntityCfg("robot", joint_names=[".*"], body_names=["hande_robotiq_hande_base_link"])
+        robot_entity_cfg = SceneEntityCfg("robot", joint_names=["left_iiwa_joint_.*"], body_names=["left_iiwa_lint_ee"])
     else:
         raise ValueError(f"Robot {args_cli.robot} is not supported. Valid: franka_panda, ur10")
     # Resolving the scene entities

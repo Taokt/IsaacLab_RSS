@@ -19,6 +19,8 @@ PhysX. This helps perform parallelized computation of the inverse kinematics.
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import torch
+import numpy as np
 
 from omni.isaac.lab.app import AppLauncher
 
@@ -74,10 +76,11 @@ from omni.isaac.lab.utils.assets import ISAACLAB_NUCLEUS_DIR
 ##
 # Configuration
 ##
-TRASH_CAN_USD_PATH = "/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/my_can.usd"
+# TRASH_CAN_USD_PATH = "/home/ji0341li/CS_Project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/source/my_tasks/can.usd"
+TRASH_CAN_USD_PATH = "/workspace/isaaclab/source/my_tasks/can.usd"
 KUKA_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path="/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/iiwa7.usd",
+        usd_path="/workspace/isaaclab/source/my_tasks/iiwa7.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -117,7 +120,7 @@ KUKA_CFG = ArticulationCfg(
 )
 KUKA_CFG_2 = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path="/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/iiwa7.usd",
+        usd_path="/workspace/isaaclab/source/my_tasks/iiwa7.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -210,13 +213,9 @@ class TableTopSceneCfg(InteractiveSceneCfg):
         )
 
 
-def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
-    """Runs the simulation loop."""
-    # Extract scene entities
-    # note: we only do this here for readability.
-    robot = scene["robot"]
-
-    # Create controller
+def initialize_controller(sim, scene, robot_type):
+    """Initialize the controller and configuration for the robot."""
+    # Initialize the controller
     diff_ik_cfg = DifferentialIKControllerCfg(
         command_type="pose", use_relative_mode=False, ik_method="dls"
     )
@@ -224,7 +223,176 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         diff_ik_cfg, num_envs=scene.num_envs, device=sim.device
     )
 
-    # Markers
+    # Define robot-specific parameters
+    if robot_type == "franka_panda":
+        robot_entity_cfg = SceneEntityCfg(
+            "robot", joint_names=["panda_joint.*"], body_names=["panda_hand"]
+        )
+    elif robot_type == "ur10":
+        robot_entity_cfg = SceneEntityCfg(
+            "robot", joint_names=[".*"], body_names=["ee_link"]
+        )
+    elif robot_type == "kuka":
+        robot_entity_cfg = SceneEntityCfg(
+            "robot", joint_names=[".*"], body_names=["hande_robotiq_hande_base_link"]
+        )
+    else:
+        raise ValueError(
+            f"Robot {robot_type} is not supported. Valid: franka_panda, ur10, kuka"
+        )
+
+    robot_entity_cfg.resolve(scene)
+
+    # Determine the frame index for the end-effector
+    if scene["robot"].is_fixed_base:
+        ee_jacobi_idx = robot_entity_cfg.body_ids[0] - 1
+    else:
+        ee_jacobi_idx = robot_entity_cfg.body_ids[0]
+
+    return diff_ik_controller, robot_entity_cfg, ee_jacobi_idx
+
+
+def reset_simulation(
+    robot, robot_entity_cfg, diff_ik_controller, ik_commands, ee_goals, current_goal_idx
+):
+    """Reset the simulation, including robot joint states and IK commands."""
+    joint_pos = robot.data.default_joint_pos.clone()
+    joint_vel = robot.data.default_joint_vel.clone()
+    robot.write_joint_state_to_sim(joint_pos, joint_vel)
+    robot.reset()
+
+    ik_commands[:] = ee_goals[current_goal_idx]
+    print(ee_goals[current_goal_idx])
+    diff_ik_controller.reset()
+    diff_ik_controller.set_command(ik_commands)
+
+    # Update the goal index
+    current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
+    return current_goal_idx
+
+
+def compute_joint_commands(robot, robot_entity_cfg, diff_ik_controller, ee_jacobi_idx):
+    """Compute joint commands using the differential IK controller."""
+    jacobian = robot.root_physx_view.get_jacobians()[
+        :, ee_jacobi_idx, :, robot_entity_cfg.joint_ids
+    ]
+    ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
+    root_pose_w = robot.data.root_state_w[:, 0:7]
+    joint_pos = robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
+
+    # Compute the end-effector pose in the base frame
+    ee_pos_b, ee_quat_b = subtract_frame_transforms(
+        root_pose_w[:, 0:3], root_pose_w[:, 3:7], ee_pose_w[:, 0:3], ee_pose_w[:, 3:7]
+    )
+    # Compute joint commands
+    joint_pos_des = diff_ik_controller.compute(ee_pos_b, ee_quat_b, jacobian, joint_pos)
+    return joint_pos_des
+
+
+def transform_pose(robot, ee_goals):
+    """
+    Convert local end-effector goals to world coordinates based on the robot's base pose.
+
+    Args:
+        robot: The robot object containing the root state and other configurations.
+        ee_goals (torch.Tensor): Local end-effector goals in the format [x, y, z, qx, qy, qz, qw].
+
+    Returns:
+        ee_goals_world (torch.Tensor): Transformed goals in the world frame.
+    """
+    # Extract the robot's base pose in the world frame
+    robot_base_pose = robot.data.root_state_w[:, 0:7]  # [x, y, z, qw, qx, qy, qz]
+    base_pos = robot_base_pose[:, 0:3]  # Base position [x, y, z]
+    base_quat = robot_base_pose[:, 3:7]  # Base quaternion [qw, qx, qy, qz]
+
+    # Prepare tensor for world goals
+    ee_goals_world = torch.zeros_like(ee_goals, device=ee_goals.device)
+
+    for i in range(ee_goals.shape[0]):
+        # Extract local position and orientation of the goal
+        local_pos = ee_goals[i, 0:3]
+        local_quat = ee_goals[i, 3:7]
+
+        # Compute world position
+        world_pos = base_pos[0] + rotate_vector_by_quaternion(local_pos, base_quat[0])
+
+        # Compute world quaternion: q_world = q_base * q_local
+        base_quat_np = (
+            base_quat[0].cpu().numpy()
+        )  # Convert to NumPy for quaternion multiplication
+        local_quat_np = local_quat.cpu().numpy()
+        world_quat_np = quaternion_multiply(base_quat_np, local_quat_np)
+
+        # Store transformed pose
+        ee_goals_world[i, 0:3] = torch.tensor(world_pos, device=ee_goals.device)
+        ee_goals_world[i, 3:7] = torch.tensor(world_quat_np, device=ee_goals.device)
+
+    return ee_goals_world
+
+
+def rotate_vector_by_quaternion(vector, quaternion):
+    """
+    Rotate a 3D vector by a quaternion.
+
+    Args:
+        vector (torch.Tensor): A 3D vector [x, y, z].
+        quaternion (torch.Tensor): A quaternion [qw, qx, qy, qz].
+
+    Returns:
+        rotated_vector (torch.Tensor): Rotated vector in the world frame.
+    """
+    qw, qx, qy, qz = quaternion
+    x, y, z = vector
+
+    # Quaternion rotation formula
+    t2 = qw * qx
+    t3 = qw * qy
+    t4 = qw * qz
+    t5 = -qx * qx
+    t6 = qx * qy
+    t7 = qx * qz
+    t8 = -qy * qy
+    t9 = qy * qz
+    t10 = -qz * qz
+
+    rx = 2.0 * ((t8 + t10) * x + (t6 - t4) * y + (t3 + t7) * z) + x
+    ry = 2.0 * ((t4 + t6) * x + (t5 + t10) * y + (t9 - t2) * z) + y
+    rz = 2.0 * ((t7 - t3) * x + (t2 + t9) * y + (t5 + t8) * z) + z
+
+    return torch.tensor([rx, ry, rz], device=vector.device)
+
+
+def quaternion_multiply(q1, q2):
+    """
+    Perform quaternion multiplication q1 * q2.
+
+    Args:
+        q1 (numpy.ndarray): Quaternion [qw, qx, qy, qz].
+        q2 (numpy.ndarray): Quaternion [qw, qx, qy, qz].
+
+    Returns:
+        numpy.ndarray: Result of quaternion multiplication.
+    """
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+    return np.array([w, x, y, z])
+
+
+def run_simulator(sim, scene):
+    """Runs the simulation loop."""
+    # Extract scene entities
+    robot = scene["robot"]
+
+    # Initialize the controller
+    diff_ik_controller, robot_entity_cfg, ee_jacobi_idx = initialize_controller(
+        sim, scene, args_cli.robot
+    )
+
+    # Markers for visualization
     frame_marker_cfg = FRAME_MARKER_CFG.copy()
     frame_marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
     ee_marker = VisualizationMarkers(
@@ -235,63 +403,33 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     )
 
     # Define goals for the arm
-    ee_goals = [
-        [0.5, 0.5, 0.7, 0.707, 0, 0.707, 0],
-        [0.5, -0.4, 0.6, 0.707, 0.707, 0.0, 0.0],
-        [0.5, 0, 0.5, 0.0, 1.0, 0.0, 0.0],
-    ]
-    ee_goals = torch.tensor(ee_goals, device=sim.device)
-    # Track the given command
+    ee_goals = torch.tensor(
+        [
+            [0.5, 0.5, 0.7, 0.707, 0, 0.707, 0],
+            [0.5, -0.4, 0.6, 0.707, 0.707, 0.0, 0.0],
+            [0.5, 0, 0.5, 0.0, 1.0, 0.0, 0.0],
+        ],
+        device=sim.device,
+    )
+
+    ee_globel_goals = transform_pose(robot, ee_goals)
+
     current_goal_idx = 0
-    # Create buffers to store actions
     ik_commands = torch.zeros(
         scene.num_envs, diff_ik_controller.action_dim, device=robot.device
     )
-    ik_commands[:] = ee_goals[current_goal_idx]
 
-    # Specify robot-specific parameters
-    if args_cli.robot == "franka_panda":
-        robot_entity_cfg = SceneEntityCfg(
-            "robot", joint_names=["panda_joint.*"], body_names=["panda_hand"]
-        )
-    elif args_cli.robot == "ur10":
-        robot_entity_cfg = SceneEntityCfg(
-            "robot", joint_names=[".*"], body_names=["ee_link"]
-        )
-    elif args_cli.robot == "kuka":
-        # robot_entity_cfg = SceneEntityCfg("robot", joint_names=["A1", "A2", "A3", "A4", "A5", "A6", "A7"], body_names=["hande_robotiq_hande_base_link"])
-        robot_entity_cfg = SceneEntityCfg(
-            "robot", joint_names=[".*"], body_names=["hande_robotiq_hande_base_link"]
-        )
-    else:
-        raise ValueError(
-            f"Robot {args_cli.robot} is not supported. Valid: franka_panda, ur10"
-        )
-    # Resolving the scene entities
-    robot_entity_cfg.resolve(scene)
-    # Obtain the frame index of the end-effector
-    # For a fixed base robot, the frame index is one less than the body index. This is because
-    # the root body is not included in the returned Jacobians.
-    if robot.is_fixed_base:
-        ee_jacobi_idx = robot_entity_cfg.body_ids[0] - 1
-    else:
-        ee_jacobi_idx = robot_entity_cfg.body_ids[0]
-
-    for idx, joint_name in enumerate(robot_entity_cfg.joint_names):
-        print(f"Joint ID: {idx}, Joint Name: {joint_name}")
-
-    # Define simulation stepping
+    # Simulation parameters
     sim_dt = sim.get_physics_dt()
     count = 0
-    # Simulation loop
+
     while simulation_app.is_running():
         # reset
-        if count % 300 == 0:
+        if count % 150 == 0:
             # reset time
             count = 0
             # reset joint state
             joint_pos = robot.data.default_joint_pos.clone()
-            print(joint_pos)
             joint_vel = robot.data.default_joint_vel.clone()
             robot.write_joint_state_to_sim(joint_pos, joint_vel)
             robot.reset()
@@ -311,6 +449,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
             root_pose_w = robot.data.root_state_w[:, 0:7]
             joint_pos = robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
+            # print("obtain quantities from simulation", root_pose_w, joint_pos)
             # compute frame in root frame
             ee_pos_b, ee_quat_b = subtract_frame_transforms(
                 root_pose_w[:, 0:3],
@@ -318,30 +457,41 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 ee_pose_w[:, 0:3],
                 ee_pose_w[:, 3:7],
             )
+            print("compute frame in root frame", ee_pos_b, ee_quat_b)
             # compute the joint commands
             joint_pos_des = diff_ik_controller.compute(
                 ee_pos_b, ee_quat_b, jacobian, joint_pos
             )
+        # if count % 300 == 0:
+        #     current_goal_idx = reset_simulation(
+        #         robot,
+        #         robot_entity_cfg,
+        #         diff_ik_controller,
+        #         ik_commands,
+        #         ee_globel_goals,
+        #         current_goal_idx,
+        #     )
+        # else:
+        #     joint_pos_des = compute_joint_commands(
+        #         robot, robot_entity_cfg, diff_ik_controller, ee_jacobi_idx
+        #     )
+        #     robot.set_joint_position_target(
+        #         joint_pos_des, joint_ids=robot_entity_cfg.joint_ids
+        #     )
 
         # apply actions
-        # joint_pos_des[:, 0:9] = torch.tensor([[0,0,0,0,0,0,0,1.0, 0.025]], device='cuda:0')
-        # joint_pos_des[:, 0:7] = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 3.14, 0.78]], device='cuda:0')
-        # print('current position: ',joint_pos)
-        # print('angle output: ',joint_pos_des)
         robot.set_joint_position_target(
             joint_pos_des, joint_ids=robot_entity_cfg.joint_ids
         )
+
+        # Perform simulation step
         scene.write_data_to_sim()
-        # perform step
         sim.step()
-        # update sim-time
         count += 1
-        # update buffers
         scene.update(sim_dt)
 
-        # obtain quantities from simulation
+        # Visualization
         ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
-        # update marker positions
         ee_marker.visualize(ee_pose_w[:, 0:3], ee_pose_w[:, 3:7])
         goal_marker.visualize(
             ik_commands[:, 0:3] + scene.env_origins, ik_commands[:, 3:7]
