@@ -26,7 +26,9 @@ import argparse
 from omni.isaac.lab.app import AppLauncher
 
 # add argparse arguments
-parser = argparse.ArgumentParser(description="This script demonstrates how to use the camera sensor.")
+parser = argparse.ArgumentParser(
+    description="This script demonstrates how to use the camera sensor."
+)
 parser.add_argument(
     "--draw",
     action="store_true",
@@ -101,7 +103,10 @@ def define_sensor() -> Camera:
         colorize_instance_id_segmentation=True,
         colorize_instance_segmentation=True,
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
+            focal_length=24.0,
+            focus_distance=400.0,
+            horizontal_aperture=20.955,
+            clipping_range=(0.1, 1.0e5),
         ),
     )
     # Create camera
@@ -138,15 +143,21 @@ def design_scene() -> dict:
             "rigid_props": sim_utils.RigidBodyPropertiesCfg(),
             "mass_props": sim_utils.MassPropertiesCfg(mass=5.0),
             "collision_props": sim_utils.CollisionPropertiesCfg(),
-            "visual_material": sim_utils.PreviewSurfaceCfg(diffuse_color=color, metallic=0.5),
+            "visual_material": sim_utils.PreviewSurfaceCfg(
+                diffuse_color=color, metallic=0.5
+            ),
             "semantic_tags": [("class", prim_type)],
         }
         if prim_type == "Cube":
-            shape_cfg = sim_utils.CuboidCfg(size=(0.25, 0.25, 0.25), **common_properties)
+            shape_cfg = sim_utils.CuboidCfg(
+                size=(0.25, 0.25, 0.25), **common_properties
+            )
         elif prim_type == "Cone":
             shape_cfg = sim_utils.ConeCfg(radius=0.1, height=0.25, **common_properties)
         elif prim_type == "Cylinder":
-            shape_cfg = sim_utils.CylinderCfg(radius=0.25, height=0.25, **common_properties)
+            shape_cfg = sim_utils.CylinderCfg(
+                radius=0.25, height=0.25, **common_properties
+            )
         # Rigid Object
         obj_cfg = RigidObjectCfg(
             prim_path=f"/World/Objects/Obj_{i:02d}",
@@ -169,7 +180,9 @@ def run_simulator(sim: sim_utils.SimulationContext, scene_entities: dict):
     camera: Camera = scene_entities["camera"]
 
     # Create replicator writer
-    output_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "output", "camera")
+    output_dir = os.path.join(
+        os.path.dirname(os.path.realpath(__file__)), "output", "camera"
+    )
     rep_writer = rep.BasicWriter(
         output_dir=output_dir,
         frame_padding=0,
@@ -179,11 +192,14 @@ def run_simulator(sim: sim_utils.SimulationContext, scene_entities: dict):
     )
 
     # Camera positions, targets, orientations
-    camera_positions = torch.tensor([[2.5, 2.5, 2.5], [-2.5, -2.5, 2.5]], device=sim.device)
+    camera_positions = torch.tensor(
+        [[2.5, 2.5, 2.5], [-2.5, -2.5, 2.5]], device=sim.device
+    )
     camera_targets = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]], device=sim.device)
     # These orientations are in ROS-convention, and will position the cameras to view the origin
     camera_orientations = torch.tensor(  # noqa: F841
-        [[-0.1759, 0.3399, 0.8205, -0.4247], [-0.4247, 0.8205, -0.3399, 0.1759]], device=sim.device
+        [[-0.1759, 0.3399, 0.8205, -0.4247], [-0.4247, 0.8205, -0.3399, 0.1759]],
+        device=sim.device,
     )
 
     # Set pose: There are two ways to set the pose of the camera.
@@ -211,17 +227,35 @@ def run_simulator(sim: sim_utils.SimulationContext, scene_entities: dict):
         # Print camera info
         print(camera)
         if "rgb" in camera.data.output.keys():
-            print("Received shape of rgb image        : ", camera.data.output["rgb"].shape)
+            print(
+                "Received shape of rgb image        : ", camera.data.output["rgb"].shape
+            )
         if "distance_to_image_plane" in camera.data.output.keys():
-            print("Received shape of depth image      : ", camera.data.output["distance_to_image_plane"].shape)
+            print(
+                "Received shape of depth image      : ",
+                camera.data.output["distance_to_image_plane"].shape,
+            )
         if "normals" in camera.data.output.keys():
-            print("Received shape of normals          : ", camera.data.output["normals"].shape)
+            print(
+                "Received shape of normals          : ",
+                camera.data.output["normals"].shape,
+            )
         if "semantic_segmentation" in camera.data.output.keys():
-            print("Received shape of semantic segm.   : ", camera.data.output["semantic_segmentation"].shape)
+            print(
+                "Received shape of semantic segm.   : ",
+                camera.data.output["semantic_segmentation"].shape,
+            )
         if "instance_segmentation_fast" in camera.data.output.keys():
-            print("Received shape of instance segm.   : ", camera.data.output["instance_segmentation_fast"].shape)
+            print(
+                "Received shape of instance segm.   : ",
+                camera.data.output["instance_segmentation_fast"].shape,
+            )
         if "instance_id_segmentation_fast" in camera.data.output.keys():
-            print("Received shape of instance id segm.: ", camera.data.output["instance_id_segmentation_fast"].shape)
+            print(
+                "Received shape of instance id segm.: ",
+                camera.data.output["instance_id_segmentation_fast"].shape,
+            )
+        print("intrinsic_matrix", camera.data.intrinsic_matrices[camera_index])
         print("-------------------------------")
 
         # Extract camera data
@@ -229,7 +263,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene_entities: dict):
             # Save images from camera at camera_index
             # note: BasicWriter only supports saving data in numpy format, so we need to convert the data to numpy.
             single_cam_data = convert_dict_to_backend(
-                {k: v[camera_index] for k, v in camera.data.output.items()}, backend="numpy"
+                {k: v[camera_index] for k, v in camera.data.output.items()},
+                backend="numpy",
             )
 
             # Extract the other information
@@ -237,9 +272,15 @@ def run_simulator(sim: sim_utils.SimulationContext, scene_entities: dict):
 
             # Pack data back into replicator format to save them using its writer
             rep_output = {"annotators": {}}
-            for key, data, info in zip(single_cam_data.keys(), single_cam_data.values(), single_cam_info.values()):
+            for key, data, info in zip(
+                single_cam_data.keys(),
+                single_cam_data.values(),
+                single_cam_info.values(),
+            ):
                 if info is not None:
-                    rep_output["annotators"][key] = {"render_product": {"data": data, **info}}
+                    rep_output["annotators"][key] = {
+                        "render_product": {"data": data, **info}
+                    }
                 else:
                     rep_output["annotators"][key] = {"render_product": {"data": data}}
             # Save images
@@ -247,8 +288,15 @@ def run_simulator(sim: sim_utils.SimulationContext, scene_entities: dict):
             rep_output["trigger_outputs"] = {"on_time": camera.frame[camera_index]}
             rep_writer.write(rep_output)
 
+        # print("Camera index:", camera_index)
+        # print("Camera data output:", camera.data.output)
+
         # Draw pointcloud if there is a GUI and --draw has been passed
-        if sim.has_gui() and args_cli.draw and "distance_to_image_plane" in camera.data.output.keys():
+        if (
+            sim.has_gui()
+            and args_cli.draw
+            and "distance_to_image_plane" in camera.data.output.keys()
+        ):
             # Derive pointcloud from camera at camera_index
             pointcloud = create_pointcloud_from_depth(
                 intrinsic_matrix=camera.data.intrinsic_matrices[camera_index],
