@@ -56,6 +56,7 @@ from omni.isaac.lab.scene import InteractiveScene, InteractiveSceneCfg
 from omni.isaac.lab.utils import configclass
 from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
 from omni.isaac.lab.utils.math import subtract_frame_transforms
+from omni.isaac.lab.assets import RigidObjectCfg
 
 ##
 # Pre-defined configs
@@ -75,7 +76,7 @@ TRASH_CAN_USD_PATH = "/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/I
 
 KUKA_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path="/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/KUKA_Dual_Arm_LTH.usd",
+        usd_path="/home/zyf/CS_project/3D-Diffusion-Policy-LTH/third_party/IsaacLab_RSS/my_tasks/kuka_dual_arm.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -165,7 +166,7 @@ KUKA_CFG = ArticulationCfg(
             stiffness=2e3,
             damping=1e2,
         ),
-    },
+    },  # type: ignore
     soft_joint_pos_limit_factor=1.0,
 )
 
@@ -208,17 +209,17 @@ class TableTopSceneCfg(InteractiveSceneCfg):
         ),
     )
 
-    can = AssetBaseCfg(
-        prim_path="/World/TrashBin",
-        spawn=sim_utils.UsdFileCfg(
-            usd_path=TRASH_CAN_USD_PATH,
-            scale=(0.5, 0.5, 0.5),
+    object = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Object",
+        init_state=RigidObjectCfg.InitialStateCfg(
+            pos=[1.5, 0, 0.055], rot=[1, 0, 0, 0]
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(
-            pos=(1.0, 2.0, 0.5)  # 设置垃圾桶的位置 (x, y, z)
+        spawn=sim_utils.UsdFileCfg(
+            # usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
+            usd_path=TRASH_CAN_USD_PATH,
+            scale=(0.8, 0.8, 0.8),
         ),
     )
-
     # articulation
     if args_cli.robot == "franka_panda":
         robot = FRANKA_PANDA_HIGH_PD_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
@@ -264,9 +265,14 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     #     [-1.0, -0.6, 0.3, 0.0, 1.0, 0.0, 0.0],
     # ]
     ee_goals = [
-        [-0.5, 0.0, 0.7, 0.707, 0, 0.707, 0],
-        [-0.8, -0.8, 0.6, 0.707, 0.707, 0.0, 0.0],
-        [-0.5, 0, 0.5, 0.0, 1.0, 0.0, 0.0],
+        [-0.75, 0.0, 0.3, 0.0, 1.0, 0.0, 0.0],
+        [-0.75, -0.05, 0.3, 0.0, 1.0, 0.0, 0.0],
+        [-0.75, -0.10, 0.3, 0.0, 1.0, 0.0, 0.0],
+        [-0.75, -0.15, 0.3, 0.0, 1.0, 0.0, 0.0],
+        [-1.0, -0.15, 0.3, 0.0, 1.0, 0.0, 0.0],
+        [-1.0, -0.20, 0.3, 0.0, 1.0, 0.0, 0.0],
+        # [-0.8, -0.8, 0.6, 1.0, 0.0, 0.0],
+        # [-0.5, 0, 0.5, 0.0, 1.0, 0.0, 0.0],
     ]
     ee_goals = torch.tensor(ee_goals, device=sim.device)
     # Track the given command
@@ -319,7 +325,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # Simulation loop
     while simulation_app.is_running():
         # reset
-        if count % 500 == 0:
+        if count % 300 == 0:
             # reset time
             count = 0
             # reset joint state
