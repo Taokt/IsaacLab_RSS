@@ -89,33 +89,97 @@ KUKA_CFG = ArticulationCfg(
         # collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
+        # joint_pos={
+        #     "left_iiwa_joint_1": 0.0,
+        #     "left_iiwa_joint_2": -0.569,
+        #     "left_iiwa_joint_3": 0.0,
+        #     "left_iiwa_joint_4": -1.810,
+        #     "left_iiwa_joint_5": 0.0,
+        #     "left_iiwa_joint_6": 1.037,
+        #     "left_iiwa_joint_7": 0.741,
+        #     "right_iiwa_joint_1": 0.0,
+        #     "right_iiwa_joint_2": -0.569,
+        #     "right_iiwa_joint_3": 0.0,
+        #     "right_iiwa_joint_4": -1.810,
+        #     "right_iiwa_joint_5": 0.0,
+        #     "right_iiwa_joint_6": 1.037,
+        #     "right_iiwa_joint_7": 0.741,
+        # },
         joint_pos={
             "left_iiwa_joint_1": 0.0,
-            "left_iiwa_joint_2": 0.0,
+            "left_iiwa_joint_2": -0.569,
             "left_iiwa_joint_3": 0.0,
-            "left_iiwa_joint_4": 0.0,
+            "left_iiwa_joint_4": -1.810,
             "left_iiwa_joint_5": 0.0,
-            "left_iiwa_joint_6": 0.0,
-            "left_iiwa_joint_7": 0.0,
+            "left_iiwa_joint_6": 1.037,
+            "left_iiwa_joint_7": 0.741,
             "right_iiwa_joint_1": 0.0,
-            "right_iiwa_joint_2": 0.0,
+            "right_iiwa_joint_2": 0,
             "right_iiwa_joint_3": 0.0,
-            "right_iiwa_joint_4": 0.0,
+            "right_iiwa_joint_4": 0,
             "right_iiwa_joint_5": 0.0,
-            "right_iiwa_joint_6": 0.0,
-            "right_iiwa_joint_7": 0.0,
+            "right_iiwa_joint_6": 0,
+            "right_iiwa_joint_7": 0,
         },
     ),
     actuators={
-        "arm": ImplicitActuatorCfg(
-            joint_names_expr=[".*"],
-            velocity_limit=100.0,
-            effort_limit=100.0,
-            stiffness=1000000.0,
-            damping=40.0,
+        "kuka_left_shoulder": ImplicitActuatorCfg(
+            joint_names_expr=["left_iiwa_joint_[1-4]"],
+            effort_limit=87.0,
+            velocity_limit=2.175,
+            stiffness=80.0,
+            damping=4.0,
+        ),
+        "kuka_left_forearm": ImplicitActuatorCfg(
+            joint_names_expr=["left_iiwa_joint_[5-7]"],
+            effort_limit=12.0,
+            velocity_limit=2.61,
+            stiffness=80.0,
+            damping=4.0,
+        ),
+        "kuka_left_hand": ImplicitActuatorCfg(
+            joint_names_expr=["left_iiwa_gripper_.*"],
+            effort_limit=200.0,
+            velocity_limit=0.2,
+            stiffness=2e3,
+            damping=1e2,
+        ),
+        "kuka_right_shoulder": ImplicitActuatorCfg(
+            joint_names_expr=["right_iiwa_joint_[1-4]"],
+            effort_limit=87.0,
+            velocity_limit=2.175,
+            stiffness=80.0,
+            damping=4.0,
+        ),
+        "kuka_right_forearm": ImplicitActuatorCfg(
+            joint_names_expr=["right_iiwa_joint_[5-7]"],
+            effort_limit=12.0,
+            velocity_limit=2.61,
+            stiffness=80.0,
+            damping=4.0,
+        ),
+        "kuka_right_hand": ImplicitActuatorCfg(
+            joint_names_expr=["right_iiwa_gripper_.*"],
+            effort_limit=200.0,
+            velocity_limit=0.2,
+            stiffness=2e3,
+            damping=1e2,
         ),
     },
+    soft_joint_pos_limit_factor=1.0,
 )
+
+KUKA_CFG_HIGH_PD_CFG = KUKA_CFG.copy()
+KUKA_CFG_HIGH_PD_CFG.spawn.rigid_props.disable_gravity = True
+KUKA_CFG_HIGH_PD_CFG.actuators["kuka_left_shoulder"].stiffness = 400.0
+KUKA_CFG_HIGH_PD_CFG.actuators["kuka_left_shoulder"].damping = 80.0
+KUKA_CFG_HIGH_PD_CFG.actuators["kuka_left_forearm"].stiffness = 400.0
+KUKA_CFG_HIGH_PD_CFG.actuators["kuka_left_forearm"].damping = 80.0
+
+KUKA_CFG_HIGH_PD_CFG.actuators["kuka_right_shoulder"].stiffness = 400.0
+KUKA_CFG_HIGH_PD_CFG.actuators["kuka_right_shoulder"].damping = 80.0
+KUKA_CFG_HIGH_PD_CFG.actuators["kuka_right_forearm"].stiffness = 400.0
+KUKA_CFG_HIGH_PD_CFG.actuators["kuka_right_forearm"].damping = 80.0
 
 
 @configclass
@@ -161,7 +225,7 @@ class TableTopSceneCfg(InteractiveSceneCfg):
     elif args_cli.robot == "ur10":
         robot = UR10_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
     elif args_cli.robot == "kuka":
-        robot = KUKA_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        robot = KUKA_CFG_HIGH_PD_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
     else:
         raise ValueError(
@@ -194,10 +258,15 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     )
 
     # Define goals for the arm
+    # ee_goals = [
+    #     [-0.5, -1.0, 0.5, 0.707, 0, 0.707, 0],
+    #     [-1.0, -0.8, 0.4, 0.707, 0.707, 0.0, 0.0],
+    #     [-1.0, -0.6, 0.3, 0.0, 1.0, 0.0, 0.0],
+    # ]
     ee_goals = [
-        [-0.5, -1.0, 0.5, 0.707, 0, 0.707, 0],
-        [-1.0, -0.8, 0.4, 0.707, 0.707, 0.0, 0.0],
-        [-1.0, -0.6, 0.3, 0.0, 1.0, 0.0, 0.0],
+        [-0.5, 0.0, 0.7, 0.707, 0, 0.707, 0],
+        [-0.8, -0.8, 0.6, 0.707, 0.707, 0.0, 0.0],
+        [-0.5, 0, 0.5, 0.0, 1.0, 0.0, 0.0],
     ]
     ee_goals = torch.tensor(ee_goals, device=sim.device)
     # Track the given command
