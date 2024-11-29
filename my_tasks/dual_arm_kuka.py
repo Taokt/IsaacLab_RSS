@@ -90,22 +90,6 @@ KUKA_CFG = ArticulationCfg(
         # collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        # joint_pos={
-        #     "left_iiwa_joint_1": 0.0,
-        #     "left_iiwa_joint_2": -0.569,
-        #     "left_iiwa_joint_3": 0.0,
-        #     "left_iiwa_joint_4": -1.810,
-        #     "left_iiwa_joint_5": 0.0,
-        #     "left_iiwa_joint_6": 1.037,
-        #     "left_iiwa_joint_7": 0.741,
-        #     "right_iiwa_joint_1": 0.0,
-        #     "right_iiwa_joint_2": -0.569,
-        #     "right_iiwa_joint_3": 0.0,
-        #     "right_iiwa_joint_4": -1.810,
-        #     "right_iiwa_joint_5": 0.0,
-        #     "right_iiwa_joint_6": 1.037,
-        #     "right_iiwa_joint_7": 0.741,
-        # },
         joint_pos={
             "left_iiwa_joint_1": 0.0,
             "left_iiwa_joint_2": -0.569,
@@ -115,13 +99,29 @@ KUKA_CFG = ArticulationCfg(
             "left_iiwa_joint_6": 1.037,
             "left_iiwa_joint_7": 0.741,
             "right_iiwa_joint_1": 0.0,
-            "right_iiwa_joint_2": 0,
+            "right_iiwa_joint_2": -0.569,
             "right_iiwa_joint_3": 0.0,
-            "right_iiwa_joint_4": 0,
+            "right_iiwa_joint_4": -1.810,
             "right_iiwa_joint_5": 0.0,
-            "right_iiwa_joint_6": 0,
-            "right_iiwa_joint_7": 0,
+            "right_iiwa_joint_6": 1.037,
+            "right_iiwa_joint_7": 0.741,
         },
+        # joint_pos={
+        #     "left_iiwa_joint_1": 0.0,
+        #     "left_iiwa_joint_2": -0.569,
+        #     "left_iiwa_joint_3": 0.0,
+        #     "left_iiwa_joint_4": -1.810,
+        #     "left_iiwa_joint_5": 0.0,
+        #     "left_iiwa_joint_6": 1.037,
+        #     "left_iiwa_joint_7": 0.741,
+        #     "right_iiwa_joint_1": 0.0,
+        #     "right_iiwa_joint_2": 0,
+        #     "right_iiwa_joint_3": 0.0,
+        #     "right_iiwa_joint_4": 0,
+        #     "right_iiwa_joint_5": 0.0,
+        #     "right_iiwa_joint_6": 0,
+        #     "right_iiwa_joint_7": 0,
+        # },
     ),
     actuators={
         "kuka_left_shoulder": ImplicitActuatorCfg(
@@ -209,8 +209,8 @@ class TableTopSceneCfg(InteractiveSceneCfg):
         ),
     )
 
-    object = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/Object",
+    can = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Can",
         init_state=RigidObjectCfg.InitialStateCfg(
             pos=[1.5, 0, 0.055], rot=[1, 0, 0, 0]
         ),
@@ -259,11 +259,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     )
 
     # Define goals for the arm
-    # ee_goals = [
-    #     [-0.5, -1.0, 0.5, 0.707, 0, 0.707, 0],
-    #     [-1.0, -0.8, 0.4, 0.707, 0.707, 0.0, 0.0],
-    #     [-1.0, -0.6, 0.3, 0.0, 1.0, 0.0, 0.0],
-    # ]
+
     ee_goals = [
         [-0.75, 0.0, 0.3, 0.0, 1.0, 0.0, 0.0],
         [-0.75, -0.05, 0.3, 0.0, 1.0, 0.0, 0.0],
@@ -271,8 +267,6 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         [-0.75, -0.15, 0.3, 0.0, 1.0, 0.0, 0.0],
         [-1.0, -0.15, 0.3, 0.0, 1.0, 0.0, 0.0],
         [-1.0, -0.20, 0.3, 0.0, 1.0, 0.0, 0.0],
-        # [-0.8, -0.8, 0.6, 1.0, 0.0, 0.0],
-        # [-0.5, 0, 0.5, 0.0, 1.0, 0.0, 0.0],
     ]
     ee_goals = torch.tensor(ee_goals, device=sim.device)
     # Track the given command
