@@ -215,7 +215,6 @@ class TableTopSceneCfg(InteractiveSceneCfg):
             pos=[1.5, 0, 0.055], rot=[1, 0, 0, 0]
         ),
         spawn=sim_utils.UsdFileCfg(
-            # usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
             usd_path=TRASH_CAN_USD_PATH,
             scale=(0.8, 0.8, 0.8),
         ),
@@ -322,12 +321,12 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         if count % 300 == 0:
             # reset time
             count = 0
-            # reset joint state
+            # # reset joint state
             joint_pos = robot.data.default_joint_pos.clone()
-            # print(joint_pos)
+            # # print(joint_pos)
             joint_vel = robot.data.default_joint_vel.clone()
-            robot.write_joint_state_to_sim(joint_pos, joint_vel)
-            robot.reset()
+            # robot.write_joint_state_to_sim(joint_pos, joint_vel)
+            # robot.reset()
             # reset actions
             ik_commands[:] = ee_goals[current_goal_idx]
             joint_pos_des = joint_pos[:, robot_entity_cfg_left.joint_ids].clone()
