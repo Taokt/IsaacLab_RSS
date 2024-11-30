@@ -58,6 +58,7 @@ from omni.isaac.lab.utils.assets import ISAAC_NUCLEUS_DIR
 from omni.isaac.lab.utils.math import subtract_frame_transforms
 from omni.isaac.lab.assets import RigidObjectCfg
 
+
 ##
 # Pre-defined configs
 ##
@@ -259,14 +260,21 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
     # Define goals for the arm
 
+    # ee_goals = [
+    #     [-0.75, 0.0, 0.3, 0.0, 1.0, 0.0, 0.0],
+    #     [-0.75, -0.05, 0.3, 0.0, 1.0, 0.0, 0.0],
+    #     [-0.75, -0.10, 0.3, 0.0, 1.0, 0.0, 0.0],
+    #     [-0.75, -0.15, 0.3, 0.0, 1.0, 0.0, 0.0],
+    #     [-1.0, -0.15, 0.3, 0.0, 1.0, 0.0, 0.0],
+    #     [-1.0, -0.20, 0.3, 0.0, 1.0, 0.0, 0.0],
+    # ]
+
     ee_goals = [
-        [-0.75, 0.0, 0.3, 0.0, 1.0, 0.0, 0.0],
-        [-0.75, -0.05, 0.3, 0.0, 1.0, 0.0, 0.0],
-        [-0.75, -0.10, 0.3, 0.0, 1.0, 0.0, 0.0],
-        [-0.75, -0.15, 0.3, 0.0, 1.0, 0.0, 0.0],
-        [-1.0, -0.15, 0.3, 0.0, 1.0, 0.0, 0.0],
-        [-1.0, -0.20, 0.3, 0.0, 1.0, 0.0, 0.0],
+        [0.5, -0.5, 0.7, 0.707, 0, 0.707, 0],
+        [0.5, -0.4, 0.6, 0.707, 0.707, 0.0, 0.0],
+        [0.5, 0, 0.5, 0.0, 1.0, 0.0, 0.0],
     ]
+
     ee_goals = torch.tensor(ee_goals, device=sim.device)
     # Track the given command
     current_goal_idx = 0
