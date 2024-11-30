@@ -109,22 +109,6 @@ KUKA_CFG = ArticulationCfg(
             "right_iiwa_joint_6": 1.037,
             "right_iiwa_joint_7": 0.741,
         },
-        # joint_pos={
-        #     "left_iiwa_joint_1": 0.0,
-        #     "left_iiwa_joint_2": -0.569,
-        #     "left_iiwa_joint_3": 0.0,
-        #     "left_iiwa_joint_4": -1.810,
-        #     "left_iiwa_joint_5": 0.0,
-        #     "left_iiwa_joint_6": 1.037,
-        #     "left_iiwa_joint_7": 0.741,
-        #     "right_iiwa_joint_1": 0.0,
-        #     "right_iiwa_joint_2": 0,
-        #     "right_iiwa_joint_3": 0.0,
-        #     "right_iiwa_joint_4": 0,
-        #     "right_iiwa_joint_5": 0.0,
-        #     "right_iiwa_joint_6": 0,
-        #     "right_iiwa_joint_7": 0,
-        # },
     ),
     actuators={
         "kuka_left_shoulder": ImplicitActuatorCfg(
@@ -261,6 +245,7 @@ def control_single_arm(
         # reset controller
         diff_ik_controller.reset()
         diff_ik_controller.set_command(ik_commands)
+        print(ik_commands)
         # change goal
         current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
     else:
@@ -295,7 +280,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     diff_ik_cfg = DifferentialIKControllerCfg(
         command_type="pose", use_relative_mode=False, ik_method="dls"
     )
-    diff_ik_controller = DifferentialIKController(
+    diff_ik_controller_left = DifferentialIKController(
+        diff_ik_cfg, num_envs=scene.num_envs, device=sim.device
+    )
+    diff_ik_controller_right = DifferentialIKController(
         diff_ik_cfg, num_envs=scene.num_envs, device=sim.device
     )
 
@@ -311,15 +299,6 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
     # Define goals for the arm
 
-    # ee_goals = [
-    #     [-0.75, 0.0, 0.3, 0.0, 1.0, 0.0, 0.0],
-    #     [-0.75, -0.05, 0.3, 0.0, 1.0, 0.0, 0.0],
-    #     [-0.75, -0.10, 0.3, 0.0, 1.0, 0.0, 0.0],
-    #     [-0.75, -0.15, 0.3, 0.0, 1.0, 0.0, 0.0],
-    #     [-1.0, -0.15, 0.3, 0.0, 1.0, 0.0, 0.0],
-    #     [-1.0, -0.20, 0.3, 0.0, 1.0, 0.0, 0.0],
-    # ]
-
     left_ee_goals = [
         [-0.75, 0.0, 0.3, 0.0, 1.0, 0.0, 0.0],
         [-0.75, -0.05, 0.3, 0.0, 1.0, 0.0, 0.0],
@@ -328,11 +307,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         [-1.0, -0.15, 0.3, 0.0, 1.0, 0.0, 0.0],
         [-1.0, -0.20, 0.3, 0.0, 1.0, 0.0, 0.0],
     ]
-    # right_ee_goals = [
-    #     [-0.5, -0.5, 0.7, 0.707, 0, 0.707, 0],
-    #     [-0.5, -0.4, 0.6, 0.707, 0.707, 0.0, 0.0],
-    #     [-0.5, -1.0, 0.5, 0.0, 1.0, 0.0, 0.0],
-    # ]
+
     right_ee_goals = [
         [-0.5, 0.5, 0.7, 0.707, 0, 0.707, 0],
         [-0.5, 0.4, 0.6, 0.707, 0.707, 0.0, 0.0],
@@ -347,10 +322,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     right_current_goal_idx = 0
     # Create buffers to store actions
     left_ik_commands = torch.zeros(
-        scene.num_envs, diff_ik_controller.action_dim, device=robot.device
+        scene.num_envs, diff_ik_controller_left.action_dim, device=robot.device
     )
     right_ik_commands = torch.zeros(
-        scene.num_envs, diff_ik_controller.action_dim, device=robot.device
+        scene.num_envs, diff_ik_controller_right.action_dim, device=robot.device
     )
     left_ik_commands[:] = left_ee_goals[left_current_goal_idx]
     right_ik_commands[:] = right_ee_goals[right_current_goal_idx]
@@ -403,7 +378,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 robot_entity_cfg_left,
                 left_current_goal_idx,
                 count,
-                diff_ik_controller,
+                diff_ik_controller_left,
                 left_ik_commands,
                 left_ee_goals,
                 left_ee_jacobi_idx,
@@ -415,16 +390,16 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 robot_entity_cfg_right,
                 right_current_goal_idx,
                 count,
-                diff_ik_controller,
+                diff_ik_controller_right,
                 right_ik_commands,
                 right_ee_goals,
                 right_ee_jacobi_idx,
             )
         )
         # apply actions
-        # robot.set_joint_position_target(
-        #     left_joint_pos_des, joint_ids=robot_entity_cfg_left.joint_ids
-        # )
+        robot.set_joint_position_target(
+            left_joint_pos_des, joint_ids=robot_entity_cfg_left.joint_ids
+        )
         robot.set_joint_position_target(
             right_joint_pos_des, joint_ids=robot_entity_cfg_right.joint_ids
         )
