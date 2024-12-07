@@ -21,14 +21,30 @@ PhysX. This helps perform parallelized computation of the inverse kinematics.
 import argparse
 import csv
 from omni.isaac.lab.app import AppLauncher
+from scipy.spatial.transform import Rotation
+import sys
+from pathlib import Path
+
+# 添加 dual_arm_se3_keyboard 的父目录到 Python 搜索路径
+keyboard_module_path = Path(
+    "/home/zyf/CS_project/IsaacLabExtensionTemplate/exts/KUKA_Project/KUKA_Project/devices/keyboard"
+)
+sys.path.append(str(keyboard_module_path))
+
+from dual_arm_se3_keyboard import DualArmSe3Keyboard
 
 # add argparse arguments
 parser = argparse.ArgumentParser(
     description="Tutorial on using the differential IK controller."
 )
-# add argparse arguments
-parser = argparse.ArgumentParser(
-    description="This script demonstrates how to use the camera sensor."
+parser.add_argument(
+    "--teleop_device",
+    type=str,
+    default="keyboard",
+    help="Device for interacting with environment",
+)
+parser.add_argument(
+    "--sensitivity", type=float, default=1.0, help="Sensitivity factor."
 )
 parser.add_argument(
     "--draw",
@@ -292,50 +308,61 @@ class TableTopSceneCfg(InteractiveSceneCfg):
         )
 
 
+def multiply_quaternions(q1, q2):
+    """
+    Compute the product of two quaternions.
+
+    Args:
+        q1: First quaternion (array-like of shape [4]), in the form [w, x, y, z].
+        q2: Second quaternion (array-like of shape [4]), in the form [w, x, y, z].
+
+    Returns:
+        A numpy array representing the resulting quaternion [w, x, y, z].
+    """
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+
+    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+
+    return np.array([w, x, y, z])
+
+
 def control_single_arm(
     robot,
     robot_entity_cfg,
-    current_goal_idx,
-    count,
     diff_ik_controller,
-    ik_commands,
-    ee_goals,
     ee_jacobi_idx,
+    delta_pose=None,  # 从键盘获取的运动增量
 ):
-    if count % 30 == 0:
-        # reset time
-        count = 0
-        # # reset joint state
-        joint_pos = robot.data.default_joint_pos.clone()
-        joint_vel = robot.data.default_joint_vel.clone()
-        # reset actions
-        ik_commands[:] = ee_goals[current_goal_idx]
-        joint_pos_des = joint_pos[:, robot_entity_cfg.joint_ids].clone()
-        # reset controller
-        diff_ik_controller.reset()
-        diff_ik_controller.set_command(ik_commands)
-        # change goal
-        current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
-    else:
-        # obtain quantities from simulation
-        jacobian = robot.root_physx_view.get_jacobians()[
-            :, ee_jacobi_idx, :, robot_entity_cfg.joint_ids
-        ]
-        ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
-        root_pose_w = robot.data.root_state_w[:, 0:7]
-        joint_pos = robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
-        # compute frame in root frame
-        ee_pos_b, ee_quat_b = subtract_frame_transforms(
-            root_pose_w[:, 0:3],
-            root_pose_w[:, 3:7],
-            ee_pose_w[:, 0:3],
-            ee_pose_w[:, 3:7],
-        )
-        # compute the joint commands
-        joint_pos_des = diff_ik_controller.compute(
-            ee_pos_b, ee_quat_b, jacobian, joint_pos
-        )
-    return joint_pos_des, current_goal_idx, ik_commands
+    # 获取当前末端执行器的实际位姿
+    ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg.body_ids[0], 0:7]
+    root_pose_w = robot.data.root_state_w[:, 0:7]
+    joint_pos = robot.data.joint_pos[:, robot_entity_cfg.joint_ids]
+    jacobian = robot.root_physx_view.get_jacobians()[
+        :, ee_jacobi_idx, :, robot_entity_cfg.joint_ids
+    ]
+
+    # 计算当前末端执行器的位姿（在根坐标系下）
+    ee_pos_b, ee_quat_b = subtract_frame_transforms(
+        root_pose_w[:, 0:3],
+        root_pose_w[:, 3:7],
+        ee_pose_w[:, 0:3],
+        ee_pose_w[:, 3:7],
+    )
+
+    # 如果有键盘输入，更新目标位姿
+    if delta_pose is not None:
+        ee_pos_b += delta_pose[:3]  # 增加位置偏移
+        ee_quat_delta = Rotation.from_rotvec(delta_pose[3:6]).as_quat()
+        ee_quat_b = multiply_quaternions(ee_quat_b, ee_quat_delta)  # 增加旋转偏移
+
+    # 计算新的关节位置命令
+    joint_pos_des = diff_ik_controller.compute(ee_pos_b, ee_quat_b, jacobian, joint_pos)
+
+    return joint_pos_des
 
 
 def farthest_point_sample(point_cloud, npoints):
@@ -485,55 +512,18 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         left_ee_jacobi_idx = robot_entity_cfg_left.body_ids[0]
         right_ee_jacobi_idx = robot_entity_cfg_right.body_ids[0]
 
-    # Define goals for the arm
-    # 假设 ee_pose_w 是一个包含位姿的 tensor
-    left_ee_pose = robot.data.body_state_w[:, robot_entity_cfg_left.body_ids[0], 0:7]
-
-    # 转换 tensor 为 list
-    ee_pose_list = left_ee_pose.tolist()
-
-    left_ee_goals = [
-        # 顶点 1: 起点
-        [-0.75, -0.2, 0.6, 0.5, 0.5, -0.5, -0.5],
-        # 顶点 2
-        [-0.75, -0.2, 0.6, 0.5, 0.5, -0.5, -0.5],
-        # 顶点 3
-        [-1.0, -0.45, 0.6, 0.5, 0.5, -0.5, -0.5],
-        # 顶点 4
-        [-1.0, -0.2, 0.6, 0.5, 0.5, -0.5, -0.5],
-        # 回到顶点 1
-        [-0.75, -0.2, 0.6, 0.5, 0.5, -0.5, -0.5],
-    ]
-    left_ee_goals.insert(0, ee_pose_list[0])
-    left_ee_goals = create_trajectory(left_ee_goals, 20)
-
-    right_ee_goals = [
-        [-0.5, 0.5, 0.7, 0.707, 0, 0.707, 0],
-        [-0.5, 0.4, 0.6, 0.707, 0.707, 0.0, 0.0],
-        [-0.5, 1.0, 0.5, 0.0, 1.0, 0.0, 0.0],
-    ]
-
-    right_ee_pose = robot.data.body_state_w[:, robot_entity_cfg_right.body_ids[0], 0:7]
-    ee_pose_list = right_ee_pose.tolist()
-    right_ee_goals.insert(0, ee_pose_list[0])
-
-    right_ee_goals = create_trajectory(right_ee_goals, 20)
-
-    left_ee_goals = torch.tensor(left_ee_goals, device=sim.device)
-    right_ee_goals = torch.tensor(right_ee_goals, device=sim.device)
-    # Track the given command
-    current_goal_idx = 0
-    left_current_goal_idx = 0
-    right_current_goal_idx = 0
-    # Create buffers to store actions
-    left_ik_commands = torch.zeros(
-        scene.num_envs, diff_ik_controller_left.action_dim, device=robot.device
+    teleop_interface = DualArmSe3Keyboard(
+        pos_sensitivity=0.05 * args_cli.sensitivity,
+        rot_sensitivity=0.05 * args_cli.sensitivity,
     )
-    right_ik_commands = torch.zeros(
-        scene.num_envs, diff_ik_controller_right.action_dim, device=robot.device
-    )
-    left_ik_commands[:] = left_ee_goals[left_current_goal_idx]
-    right_ik_commands[:] = right_ee_goals[right_current_goal_idx]
+    # add teleoperation key for env reset
+    teleop_interface.add_callback("B", sim.reset)
+    # print helper for keyboard
+    print(teleop_interface)
+
+    # reset environment
+    sim.reset()
+    teleop_interface.reset()
 
     # Create replicator writer
     output_dir = os.path.join(
@@ -575,30 +565,27 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # Simulation loop
     while simulation_app.is_running():
 
-        left_joint_pos_des, left_current_goal_idx, left_ik_commands = (
-            control_single_arm(
-                robot,
-                robot_entity_cfg_left,
-                left_current_goal_idx,
-                count,
-                diff_ik_controller_left,
-                left_ik_commands,
-                left_ee_goals,
-                left_ee_jacobi_idx,
-            )
+        delta_pose, gripper_command = teleop_interface.advance()
+        delta_pose = delta_pose.astype("float32")
+        # # convert to torch
+        # delta_pose = torch.tensor(delta_pose, device=sim.device)
+
+        # 左臂控制
+        left_joint_pos_des = control_single_arm(
+            robot,
+            robot_entity_cfg_left,
+            diff_ik_controller_left,
+            left_ee_jacobi_idx,
+            delta_pose[:6],  # 左臂的增量
         )
 
-        right_joint_pos_des, right_current_goal_idx, right_ik_commands = (
-            control_single_arm(
-                robot,
-                robot_entity_cfg_right,
-                right_current_goal_idx,
-                count,
-                diff_ik_controller_right,
-                right_ik_commands,
-                right_ee_goals,
-                right_ee_jacobi_idx,
-            )
+        # 右臂控制
+        right_joint_pos_des = control_single_arm(
+            robot,
+            robot_entity_cfg_right,
+            diff_ik_controller_right,
+            right_ee_jacobi_idx,
+            delta_pose[6:],  # 右臂的增量
         )
 
         # apply actions
@@ -622,9 +609,6 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         ee_pose_w = robot.data.body_state_w[:, robot_entity_cfg_left.body_ids[0], 0:7]
         # update marker positions
         ee_marker.visualize(ee_pose_w[:, 0:3], ee_pose_w[:, 3:7])
-        goal_marker.visualize(
-            left_ik_commands[:, 0:3] + scene.env_origins, left_ik_commands[:, 3:7]
-        )
 
         # Update camera data
         camera.update(dt=sim.get_physics_dt())
